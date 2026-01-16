@@ -1,9 +1,9 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html class="light" lang="es">
 <head>
     <meta charset="utf-8"/>
     <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
-    <title>PrinterAdmin - Registro a Google Sheets</title>
+    <title>PrinterAdmin - Gestión de Inventario</title>
     <!-- Google Fonts & Material Symbols -->
     <link href="https://fonts.googleapis.com" rel="preconnect"/>
     <link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
@@ -543,7 +543,7 @@
                 <div class="flex justify-end gap-4">
                     <button type="button" onclick="showView('inventory')" class="px-8 h-12 rounded-lg bg-slate-100 dark:bg-slate-800 font-bold transition-all hover:bg-slate-200">Cancelar</button>
                     <button type="submit" id="submitBtn" class="flex items-center justify-center gap-2 px-8 h-12 rounded-lg bg-primary text-white font-bold shadow-lg transition-all hover:bg-blue-600 disabled:opacity-70 disabled:cursor-not-allowed">
-                        <span id="btnText">Guardar en Google Sheets</span>
+                        <span id="btnText">Guardar Registro</span>
                         <div id="btnSpinner" class="hidden spinner"></div>
                     </button>
                 </div>
@@ -951,8 +951,7 @@
 </div>
 
 <script>
-    // URL DE TU API DE GOOGLE APPS SCRIPT
-    const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbwkdAp99cKxyRJjw5gKZ-DYeGV4zAIybnXYwWL-bYtpNH_2cUZb7Vo1nP-m27_X1vRqkw/exec";
+    // Sistema de inventario local
 
     let printers = JSON.parse(localStorage.getItem('printers_cache')) || [];
     let retired = JSON.parse(localStorage.getItem('retired_cache')) || [];
@@ -1018,7 +1017,22 @@
                 currentCopies: 0,
                 display: 'Sin datos',
                 color: 'slate',
-                lastChangeDate: 'Fecha no disponible'
+                lastChangeDate: 'Fecha no disponible',
+                black: {
+                    percentage: '0.0',
+                    changes: 0,
+                    remaining: 0,
+                    currentCopies: 0,
+                    color: 'slate'
+                },
+                colorToner: {
+                    percentage: '0.0',
+                    changes: 0,
+                    remaining: 0,
+                    currentCopies: 0,
+                    color: 'slate',
+                    hasColor: false
+                }
             };
         }
 
@@ -1032,7 +1046,22 @@
                 currentCopies: 0,
                 display: 'Modelo no registrado',
                 color: 'slate',
-                lastChangeDate: 'Fecha no disponible'
+                lastChangeDate: 'Fecha no disponible',
+                black: {
+                    percentage: '0.0',
+                    changes: 0,
+                    remaining: 0,
+                    currentCopies: 0,
+                    color: 'slate'
+                },
+                colorToner: {
+                    percentage: '0.0',
+                    changes: 0,
+                    remaining: 0,
+                    currentCopies: 0,
+                    color: 'slate',
+                    hasColor: false
+                }
             };
         }
 
@@ -1938,33 +1967,6 @@
         
         // Re-renderizar la tabla
         renderCountersTable(counters);
-        
-        // Sincronizar con Google Sheets
-        syncCounterToGoogleSheets(counters[index]);
-    }
-
-    // Sincronizar contador actualizado con Google Sheets
-    async function syncCounterToGoogleSheets(counter) {
-        try {
-            const response = await fetch('https://script.google.com/macros/s/AKfycbzZLr-aI06X-j-r6F_QUiIDkfg3mEIWQsXvMvl6v3GJqgR2SdJPcxBXnIzGWn4LnBJj/exec', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                body: new URLSearchParams({
-                    action: 'updateCounter',
-                    serial: counter.serial,
-                    bn: counter.bn || 0,
-                    color: counter.color || 0,
-                    location: counter.location || ''
-                })
-            });
-            
-            const result = await response.json();
-            if (!result.success) {
-                console.error('Error al sincronizar contador:', result.error);
-            }
-        } catch (error) {
-            console.error('Error en sincronización:', error);
-        }
     }
 
     // Funciones para eliminar registros
@@ -2311,43 +2313,49 @@
 
         // Bloquear UI
         btn.disabled = true;
-        btnText.innerText = "Enviando...";
+        btnText.innerText = "Guardando...";
         btnSpinner.classList.remove('hidden');
 
         try {
-            // Envío a Google Apps Script usando no-cors para evitar problemas pre-flight si no está configurado el script
-            // Nota: Con no-cors no podemos leer la respuesta pero el envío es más robusto si el script es sencillo.
-            // Para poder leer la respuesta, el script debe manejar OPTIONS y CORS.
-            const response = await fetch(WEB_APP_URL, {
-                method: "POST",
-                mode: "no-cors", 
-                cache: "no-cache",
-                headers: { 
-                    "Content-Type": "application/json; charset=UTF-8"
-                },
-                body: JSON.stringify(data)
-            });
+            // Validar campo requerido
+            if (!localData.serial || !localData.model) {
+                throw new Error("Número de serie y modelo son obligatorios");
+            }
 
             // Guardar localmente
             printers.unshift(localData);
             localStorage.setItem('printers_cache', JSON.stringify(printers));
             
-            showToast("Registro guardado exitosamente");
+            // Guardar en Firebase (si está disponible)
+            if (window.firebaseEnabled && typeof window.firebaseCrearImpresora === 'function') {
+                try {
+                    await window.firebaseCrearImpresora(localData);
+                    showToast("✅ Registro guardado en Firebase y localmente", "success");
+                } catch (firebaseError) {
+                    console.error("⚠️ Error completo de Firebase:", firebaseError);
+                    showToast("✅ Guardado localmente. Error en Firebase: " + firebaseError.message, "success");
+                }
+            } else {
+                console.log("Firebase no disponible, guardado solo local");
+                showToast("✅ Registro guardado exitosamente (local)", "success");
+            }
+            
+            renderTable(printers);
             this.reset();
             showView('inventory');
 
         } catch (error) {
-            console.error("Error:", error);
-            showToast("Error de conexión con el servidor", "error");
+            console.error("❌ Error completo al guardar:", error);
+            showToast("❌ Error al guardar el registro: " + error.message, "error");
         } finally {
             btn.disabled = false;
-            btnText.innerText = "Guardar en Google Sheets";
+            btnText.innerText = "Guardar Registro";
             btnSpinner.classList.add('hidden');
         }
     });
 
     function deletePrinter(index) {
-        if (confirm("¿Eliminar este registro de la vista local? (No se borrará de Google Sheets)")) {
+        if (confirm("¿Eliminar este registro?")) {
             printers.splice(index, 1);
             localStorage.setItem('printers_cache', JSON.stringify(printers));
             renderTable(printers);
@@ -2698,6 +2706,15 @@
                     <span class="material-symbols-outlined text-[20px] text-primary">download</span>
                     <span class="font-semibold text-sm">Exportar CSV</span>
                 </button>
+                <div class="border-t border-slate-200 dark:border-slate-700 my-2"></div>
+                <button onclick="window.firebaseCargarDatos()" class="w-full text-left px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors flex items-center gap-3">
+                    <span class="material-symbols-outlined text-[20px] text-green-500">cloud_download</span>
+                    <span class="font-semibold text-sm">📥 Cargar desde Firebase</span>
+                </button>
+                <button onclick="window.firebaseSincronizarTodo()" class="w-full text-left px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors flex items-center gap-3">
+                    <span class="material-symbols-outlined text-[20px] text-blue-500">cloud_upload</span>
+                    <span class="font-semibold text-sm">📤 Subir a Firebase</span>
+                </button>
             `;
         } else {
             // Exportar CSV, Exportar CSV en blanco, Importar CSV para otros módulos
@@ -2716,6 +2733,15 @@
                     <span class="font-semibold text-sm">Importar CSV</span>
                     <input type="file" id="csv-import-${currentTab}" accept=".csv" class="hidden" onchange="importModuleCSV(event)">
                 </label>
+                <div class="border-t border-slate-200 dark:border-slate-700 my-2"></div>
+                <button onclick="window.firebaseCargarDatos()" class="w-full text-left px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors flex items-center gap-3">
+                    <span class="material-symbols-outlined text-[20px] text-green-500">cloud_download</span>
+                    <span class="font-semibold text-sm">📥 Cargar desde Firebase</span>
+                </button>
+                <button onclick="window.firebaseSincronizarTodo()" class="w-full text-left px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors flex items-center gap-3">
+                    <span class="material-symbols-outlined text-[20px] text-blue-500">cloud_upload</span>
+                    <span class="font-semibold text-sm">📤 Subir a Firebase</span>
+                </button>
                 <div class="px-4 py-2 text-xs text-slate-500 dark:text-slate-400">
                     <p class="font-semibold mb-1">Formato soportado:</p>
                     <p>• Separador: coma (,) o punto y coma (;)</p>
@@ -2874,85 +2900,7 @@
         showToast("Plantilla CSV descargada correctamente", "success");
     }
 
-    // Función para sincronizar CSV importado con Google Sheets
-    async function syncCSVToGoogleSheets(data, module, totalRecords) {
-        if (data.length === 0) return;
-        
-        // Mostrar progreso
-        showToast(`Sincronizando ${totalRecords} registros con Google Sheets...`, "success");
-        
-        try {
-            // Preparar datos según el módulo
-            let payload = {
-                action: 'bulkInsert',
-                module: module,
-                records: []
-            };
-            
-            // Convertir datos al formato esperado por Google Apps Script
-            if (module === 'inventory') {
-                payload.records = data.map(p => ({
-                    dateReg: p.dateReg || '',
-                    dateInst: p.dateInst || 'Instalación pendiente',
-                    serial: p.serial || '',
-                    mac: p.mac || '',
-                    model: p.model || '',
-                    city: p.city || '',
-                    dept: p.dept || '',
-                    ip: p.ip || '',
-                    gateway: p.gateway || '',
-                    mask: p.mask || '',
-                    address: p.address || '',
-                    area: p.area || '',
-                    contact: p.contact || '',
-                    phone: p.phone || '',
-                    status: p.status || '',
-                    escaner: p.escaner ? 'SÍ' : 'NO',
-                    slnx: p.slnx ? 'SÍ' : 'NO',
-                    ndd: p.ndd ? 'SÍ' : 'NO',
-                    note: p.note || '',
-                    countInit: p.counterInitial || 0
-                }));
-            } else if (module === 'toner') {
-                payload.records = data.map(t => ({
-                    element: t.element || '',
-                    model: t.model || '',
-                    printerModel: t.printerModel || '',
-                    color: t.color || '',
-                    location: t.location || '',
-                    dateReg: t.dateReg || '',
-                    status: t.status || '',
-                    observation: t.observation || ''
-                }));
-            } else if (module === 'counters') {
-                payload.records = data.map(c => ({
-                    serial: c.serial || '',
-                    model: c.model || '',
-                    bn: c.bn || 0,
-                    color: c.color || 0,
-                    location: c.location || ''
-                }));
-            }
-            
-            // Enviar a Google Apps Script
-            const response = await fetch(WEB_APP_URL, {
-                method: 'POST',
-                mode: 'no-cors',
-                cache: 'no-cache',
-                headers: {
-                    'Content-Type': 'application/json; charset=UTF-8'
-                },
-                body: JSON.stringify(payload)
-            });
-            
-            // Con no-cors no podemos leer la respuesta, pero el envío se realiza
-            showToast(`${totalRecords} registros sincronizados con Google Sheets`, "success");
-            
-        } catch (error) {
-            console.error('Error al sincronizar con Google Sheets:', error);
-            showToast("Los datos se guardaron localmente, pero hubo un error al sincronizar con Google Sheets", "error");
-        }
-    }
+    // Los datos CSV se guardan únicamente de forma local
 
     function importModuleCSV(event) {
         const file = event.target.files[0];
@@ -3117,8 +3065,47 @@
                 // Cerrar menú
                 document.getElementById('settings-menu').classList.add('hidden');
                 
-                // Sincronizar con Google Sheets
-                syncCSVToGoogleSheets(newData, currentTab, newData.length);
+                showToast(`${newData.length} registros importados correctamente`, "success");
+                
+                // Guardar en Firebase (async sin bloquear UI)
+                if (window.firebaseEnabled) {
+                    setTimeout(async () => {
+                        try {
+                            let savedCount = 0;
+                            let errorCount = 0;
+                            
+                            for (const item of newData) {
+                                try {
+                                    if (currentTab === 'inventory') {
+                                        await window.firebaseCrearImpresora(item);
+                                    } else if (currentTab === 'toner') {
+                                        await window.firebaseCrearToner(item);
+                                    } else if (currentTab === 'counters') {
+                                        await window.firebaseAgregarContador(item.serial, item);
+                                    }
+                                    savedCount++;
+                                } catch (error) {
+                                    // Si ya existe, no es error crítico
+                                    if (!error.message.includes('ya existe')) {
+                                        errorCount++;
+                                        console.warn(`Error al guardar en Firebase:`, error.message);
+                                    } else {
+                                        savedCount++; // Contar como guardado si ya existía
+                                    }
+                                }
+                            }
+                            
+                            if (savedCount > 0) {
+                                showToast(`🔥 ${savedCount} registros sincronizados con Firebase`, "success");
+                            }
+                            if (errorCount > 0) {
+                                showToast(`⚠️ ${errorCount} registros no se pudieron sincronizar`, "error");
+                            }
+                        } catch (error) {
+                            console.error('Error en sincronización masiva:', error);
+                        }
+                    }, 100);
+                }
                 
             } catch (error) {
                 console.error('Error al importar CSV:', error);
@@ -3136,7 +3123,7 @@
     // FUNCIONES DE RETIRO
     let currentRetiredIndex = null;
 
-    function retirePrinter(index) {
+    async function retirePrinter(index) {
         if (!confirm('¿Estás seguro de retirar esta impresora del inventario?')) {
             return;
         }
@@ -3163,12 +3150,22 @@
         localStorage.setItem('printers_cache', JSON.stringify(printers));
         localStorage.setItem('retired_cache', JSON.stringify(retired));
         
+        // Guardar en Firebase
+        if (window.firebaseEnabled && typeof window.firebaseRegistrarRetiro === 'function') {
+            try {
+                await window.firebaseRegistrarRetiro(retiredPrinter);
+                console.log('✅ Retiro registrado en Firebase');
+            } catch (error) {
+                console.warn('⚠️ Error al registrar retiro en Firebase:', error.message);
+            }
+        }
+        
         // Cerrar modal y actualizar
         closeDetailsModal();
         renderTable(printers);
         
         // Mostrar mensaje y cambiar a vista de retiradas
-        showToast('Impresora retirada del inventario. Completa el retiro con el número de RMA.', 'success');
+        showToast('✅ Impresora retirada del inventario', 'success');
         switchTab('retired');
     }
 
@@ -3232,7 +3229,7 @@
     }
 
     // Manejar envío del formulario de agregar tóner
-    document.getElementById('add-toner-form').addEventListener('submit', function(e) {
+    document.getElementById('add-toner-form').addEventListener('submit', async function(e) {
         e.preventDefault();
         
         const newToner = {
@@ -3249,9 +3246,19 @@
         toners.push(newToner);
         localStorage.setItem('toners_cache', JSON.stringify(toners));
         
+        // Guardar en Firebase
+        if (window.firebaseEnabled && typeof window.firebaseCrearToner === 'function') {
+            try {
+                await window.firebaseCrearToner(newToner);
+                console.log('✅ Tóner guardado en Firebase');
+            } catch (error) {
+                console.warn('⚠️ Error al guardar tóner en Firebase:', error.message);
+            }
+        }
+        
         renderTonerTable(toners);
         closeAddTonerModal();
-        showToast('Tóner agregado correctamente', 'success');
+        showToast('✅ Tóner agregado correctamente', 'success');
     });
 
     // Variables y funciones para el modal de asignar tóner
@@ -3276,7 +3283,7 @@
     }
 
     // Manejar envío del formulario de asignar tóner
-    document.getElementById('assign-toner-form').addEventListener('submit', function(e) {
+    document.getElementById('assign-toner-form').addEventListener('submit', async function(e) {
         e.preventDefault();
         
         if (currentTonerIndex === null) return;
@@ -3311,14 +3318,25 @@
         
         if (counterIndex === -1) {
             // Crear nuevo registro de contador si no existe
-            counters.push({
+            const newCounter = {
                 serial: printerSerial,
                 model: model,
                 bn: counterBN,
                 color: counterColor,
                 location: printerExists.city || ''
-            });
+            };
+            counters.push(newCounter);
             counterIndex = counters.length - 1;
+            
+            // Guardar en Firebase
+            if (window.firebaseEnabled && typeof window.firebaseAgregarContador === 'function') {
+                try {
+                    await window.firebaseAgregarContador(printerSerial, newCounter);
+                    console.log('✅ Contador creado en Firebase');
+                } catch (error) {
+                    console.warn('⚠️ Error al crear contador en Firebase:', error.message);
+                }
+            }
         } else {
             // Actualizar contador existente
             counters[counterIndex].bn = counterBN;
@@ -3327,9 +3345,6 @@
         
         // Guardar los cambios en el contador
         localStorage.setItem('counters_cache', JSON.stringify(counters));
-        
-        // Sincronizar con Google Sheets
-        syncCounterToGoogleSheets(counters[counterIndex]);
         
         // Actualizar el tóner con el serial y cambiar estado a "Usado"
         toners[currentTonerIndex].status = 'Usado';
@@ -3387,7 +3402,7 @@
     }
 
     // Manejar envío del formulario de cambio de tóner
-    document.getElementById('change-toner-form').addEventListener('submit', function(e) {
+    document.getElementById('change-toner-form').addEventListener('submit', async function(e) {
         e.preventDefault();
         
         if (currentChangingPrinterIndex === null) return;
@@ -3424,14 +3439,25 @@
         
         if (counterIndex === -1) {
             // Crear nuevo registro de contador
-            counters.push({
+            const newCounter = {
                 serial: printer.serial,
                 model: model,
                 bn: newCounterBN,
                 color: newCounterColor,
                 location: printer.city || ''
-            });
+            };
+            counters.push(newCounter);
             counterIndex = counters.length - 1;
+            
+            // Guardar en Firebase
+            if (window.firebaseEnabled && typeof window.firebaseAgregarContador === 'function') {
+                try {
+                    await window.firebaseAgregarContador(printer.serial, newCounter);
+                    console.log('✅ Contador creado en Firebase (cambio de tóner)');
+                } catch (error) {
+                    console.warn('⚠️ Error al crear contador en Firebase:', error.message);
+                }
+            }
         } else {
             // Actualizar contador existente con el nuevo valor ajustado
             counters[counterIndex].bn = newCounterBN;
@@ -3441,9 +3467,6 @@
         // Guardar los cambios en el contador
         localStorage.setItem('counters_cache', JSON.stringify(counters));
         
-        // Sincronizar con Google Sheets
-        syncCounterToGoogleSheets(counters[counterIndex]);
-        
         // Actualizar tablas
         renderCountersTable(counters);
         renderTable(printers);
@@ -3452,6 +3475,39 @@
         closeChangeTonerModal();
         showToast(`Tóner cambiado. Contador ajustado: B/N=${newCounterBN.toLocaleString()}, Color=${newCounterColor.toLocaleString()}. Porcentaje restablecido al 0%`, 'success');
     });
+
+    // Función para ocultar el loader (con respaldo)
+    function hideLoader() {
+        try {
+            const loader = document.getElementById('initial-loader');
+            const mainContent = document.getElementById('main-content');
+            
+            if (loader && mainContent) {
+                loader.style.opacity = '0';
+                loader.style.transition = 'opacity 0.3s ease-out';
+                
+                setTimeout(() => {
+                    loader.style.display = 'none';
+                    mainContent.style.opacity = '1';
+                    mainContent.style.transition = 'opacity 0.3s ease-in';
+                }, 300);
+            }
+        } catch (e) {
+            console.error('Error al ocultar loader:', e);
+        }
+    }
+
+    // Intentar ocultar loader de múltiples formas
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', () => {
+            setTimeout(hideLoader, 100);
+        });
+    } else {
+        setTimeout(hideLoader, 100);
+    }
+
+    // Respaldo adicional por si falla todo lo anterior
+    setTimeout(hideLoader, 1000);
 
     window.onload = () => {
         // Verificar tema guardado y actualizar icono
@@ -3470,21 +3526,6 @@
         // Establecer fecha de registro actual al cargar
         const today = new Date().toISOString().split('T')[0];
         document.querySelector('input[name="dateReg"]').value = today;
-        
-        // Ocultar loader y mostrar contenido
-        setTimeout(() => {
-            const loader = document.getElementById('initial-loader');
-            const mainContent = document.getElementById('main-content');
-            
-            loader.style.opacity = '0';
-            loader.style.transition = 'opacity 0.3s ease-out';
-            
-            setTimeout(() => {
-                loader.style.display = 'none';
-                mainContent.style.opacity = '1';
-                mainContent.style.transition = 'opacity 0.3s ease-in';
-            }, 300);
-        }, 500);
     };
 </script>
 <!-- Modal de Gráficas -->
@@ -3547,6 +3588,392 @@
         </div>
     </div>
 </div>
+
+<!-- Firebase Integration Module -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
+  import {
+    getFirestore, collection, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc,
+    runTransaction, serverTimestamp, query, where, orderBy, getDocs, collectionGroup, onSnapshot
+  } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
+
+  // Configuración de Firebase
+  const firebaseConfig = {
+    apiKey: "AIzaSyCGQqu8MSGOJET7ic_6jmXOlSeIkNUH4wA",
+    authDomain: "inventario-web-3dc4d.firebaseapp.com",
+    projectId: "inventario-web-3dc4d",
+    storageBucket: "inventario-web-3dc4d.firebasestorage.app",
+    messagingSenderId: "307333187205",
+    appId: "1:307333187205:web:3df9a6e9270267848b8bec",
+    measurementId: "G-Y32KKXHYNC"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const db = getFirestore(app);
+
+  // Variable global para indicar si Firebase está disponible
+  window.firebaseEnabled = true;
+  window.firebaseDB = db;
+
+  console.log("✅ Firebase inicializado correctamente");
+
+  // ---------------------------
+  //  UTILIDADES
+  // ---------------------------
+  const fmtDate = (d) => {
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  };
+
+  // ---------------------------
+  //  IMPRESORAS (CRUD con unicidad)
+  // ---------------------------
+  window.firebaseCrearImpresora = async function(data) {
+    // Aceptar tanto 'numero_serie' como 'serial'
+    const serial = String(data.numero_serie || data.serial || '').trim();
+    
+    if (!serial) {
+      throw new Error('Número de serie es requerido');
+    }
+
+    await runTransaction(db, async (tx) => {
+      const serialRef = doc(db, "unique_serials", serial);
+      const impRef = doc(db, "impresoras", serial);
+
+      const lock = await tx.get(serialRef);
+      const existeImp = await tx.get(impRef);
+
+      if (lock.exists() || existeImp.exists()) {
+        throw new Error(`El número de serie ${serial} ya existe en Firebase.`);
+      }
+
+      // Crea marcador de unicidad
+      tx.set(serialRef, { createdAt: serverTimestamp() });
+
+      // Prepara payload
+      const payload = {
+        fecha_registro: data.dateReg ?? fmtDate(new Date()),
+        fecha_instalacion: data.dateInst ?? null,
+        numero_serie: serial,
+        mac: data.mac ?? "",
+        modelo: data.model ?? "",
+        ciudad: data.city ?? "",
+        departamento: data.dept ?? "",
+        ip: data.ip ?? "",
+        gateway: data.gateway ?? "",
+        mascara: data.mask ?? "",
+        direccion: data.address ?? "",
+        area: data.area ?? "",
+        contacto: data.contact ?? "",
+        telefono: data.phone ?? "",
+        estado: data.status ?? "Operativa",
+        escaner: Boolean(data.escaner),
+        slnx: Boolean(data.slnx),
+        ndd: Boolean(data.ndd),
+        contador_inicial: Number(data.counterInitial ?? 0),
+        nota: data.note ?? "",
+        fecha_creacion: serverTimestamp(),
+        fecha_actualizacion: serverTimestamp()
+      };
+
+      tx.set(impRef, payload);
+    });
+
+    console.log(`✅ Impresora ${serial} creada en Firebase`);
+    return serial;
+  };
+
+  window.firebaseActualizarImpresora = async function(numero_serie, patch) {
+    const impRef = doc(db, "impresoras", numero_serie);
+    await updateDoc(impRef, {
+      ...patch,
+      fecha_actualizacion: serverTimestamp()
+    });
+    console.log(`✅ Impresora ${numero_serie} actualizada en Firebase`);
+  };
+
+  window.firebaseObtenerImpresoras = async function() {
+    const snap = await getDocs(collection(db, "impresoras"));
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  };
+
+  // ---------------------------
+  //  CONTADORES (subcolección)
+  // ---------------------------
+  window.firebaseAgregarContador = async function(numero_serie, data) {
+    const ref = collection(db, "impresoras", numero_serie, "contadores");
+    await addDoc(ref, {
+      numero_serie,
+      modelo: data.model ?? "",
+      contador_bn: Number(data.bn ?? 0),
+      contador_color: Number(data.color ?? 0),
+      ubicacion: data.location ?? "",
+      fecha_registro: serverTimestamp(),
+      fecha_actualizacion: serverTimestamp()
+    });
+    console.log(`✅ Contador agregado para ${numero_serie}`);
+  };
+
+  window.firebaseObtenerContadores = async function(numero_serie) {
+    const snap = await getDocs(collection(db, "impresoras", numero_serie, "contadores"));
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  };
+
+  // ---------------------------
+  //  TONERS
+  // ---------------------------
+  window.firebaseCrearToner = async function(data) {
+    const docRef = await addDoc(collection(db, "toners"), {
+      elemento: data.element ?? "",
+      modelo: data.model ?? "",
+      modelo_impresora: data.printerModel ?? "",
+      color: data.color ?? "Negro",
+      ubicacion: data.location ?? "",
+      fecha_registro: data.dateReg ?? fmtDate(new Date()),
+      estado: data.status ?? "Disponible",
+      asignado_a: data.assignedTo ?? null,
+      fecha_asignacion: data.assignedDate ?? null,
+      observacion: data.observation ?? "",
+      fecha_creacion: serverTimestamp()
+    });
+    console.log(`✅ Tóner ${docRef.id} creado en Firebase`);
+    return docRef.id;
+  };
+
+  window.firebaseAsignarToner = async function(tonerId, numero_serie) {
+    const tRef = doc(db, "toners", tonerId);
+    await updateDoc(tRef, {
+      estado: "Usado",
+      asignado_a: numero_serie,
+      fecha_asignacion: fmtDate(new Date())
+    });
+    console.log(`✅ Tóner ${tonerId} asignado a ${numero_serie}`);
+  };
+
+  window.firebaseObtenerToners = async function() {
+    const snap = await getDocs(collection(db, "toners"));
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  };
+
+  // ---------------------------
+  //  RETIRADOS
+  // ---------------------------
+  window.firebaseRegistrarRetiro = async function(data) {
+    await addDoc(collection(db, "retirados"), {
+      numero_serie: data.serial,
+      modelo: data.model ?? "",
+      ubicacion: data.location ?? "",
+      contacto: data.contact ?? "",
+      rma: data.rma ?? null,
+      fecha_retiro: data.dateRetired ?? null,
+      motivo: data.motivo ?? "",
+      fecha_creacion: serverTimestamp()
+    });
+    console.log(`✅ Retiro registrado para ${data.serial}`);
+  };
+
+  window.firebaseObtenerRetirados = async function() {
+    const snap = await getDocs(collection(db, "retirados"));
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  };
+
+  // ---------------------------
+  //  HISTORIAL TAREAS (subcolección)
+  // ---------------------------
+  window.firebaseAgregarTarea = async function(numero_serie, data) {
+    const ref = collection(db, "impresoras", numero_serie, "historial_tareas");
+    await addDoc(ref, {
+      numero_serie,
+      fecha: serverTimestamp(),
+      nota: data.note ?? "",
+      usuario: data.usuario ?? null,
+      tipo_tarea: data.tipo_tarea ?? "Nota general"
+    });
+    console.log(`✅ Tarea agregada para ${numero_serie}`);
+  };
+
+  window.firebaseObtenerTareas = async function(numero_serie) {
+    const q = query(
+      collectionGroup(db, "historial_tareas"),
+      where("numero_serie", "==", numero_serie),
+      orderBy("fecha", "desc")
+    );
+    const snap = await getDocs(q);
+    return snap.docs.map(d => d.data());
+  };
+
+  // ---------------------------
+  //  SINCRONIZACIÓN INICIAL
+  // ---------------------------
+  window.firebaseSincronizarTodo = async function() {
+    try {
+      console.log("🔄 Sincronizando datos con Firebase...");
+      
+      // Sincronizar impresoras
+      if (window.printers && window.printers.length > 0) {
+        for (const printer of window.printers) {
+          if (printer.serial) {
+            try {
+              await window.firebaseCrearImpresora({
+                numero_serie: printer.serial,
+                dateReg: printer.dateReg,
+                dateInst: printer.dateInst,
+                mac: printer.mac,
+                model: printer.model,
+                city: printer.city,
+                dept: printer.dept,
+                ip: printer.ip,
+                gateway: printer.gateway,
+                mask: printer.mask,
+                address: printer.address,
+                area: printer.area,
+                contact: printer.contact,
+                phone: printer.phone,
+                status: printer.status,
+                escaner: printer.escaner,
+                slnx: printer.slnx,
+                ndd: printer.ndd,
+                counterInitial: printer.counterInitial,
+                note: printer.note
+              });
+            } catch (error) {
+              // Si ya existe, ignorar
+              if (!error.message.includes("ya existe")) {
+                console.warn(`⚠️ Error al sincronizar impresora ${printer.serial}:`, error.message);
+              }
+            }
+          }
+        }
+      }
+
+      // Sincronizar toners
+      if (window.toners && window.toners.length > 0) {
+        for (const toner of window.toners) {
+          try {
+            await window.firebaseCrearToner(toner);
+          } catch (error) {
+            console.warn("⚠️ Error al sincronizar tóner:", error.message);
+          }
+        }
+      }
+
+      // Sincronizar retirados
+      if (window.retired && window.retired.length > 0) {
+        for (const retired of window.retired) {
+          try {
+            await window.firebaseRegistrarRetiro(retired);
+          } catch (error) {
+            console.warn("⚠️ Error al sincronizar retiro:", error.message);
+          }
+        }
+      }
+
+      console.log("✅ Sincronización completada");
+      showToast("✅ Datos sincronizados con Firebase", "success");
+    } catch (error) {
+      console.error("❌ Error en sincronización:", error);
+      showToast("⚠️ Error al sincronizar algunos datos", "error");
+    }
+  };
+
+  // ---------------------------
+  //  CARGAR DATOS DESDE FIREBASE
+  // ---------------------------
+  window.firebaseCargarDatos = async function() {
+    try {
+      console.log("📥 Cargando datos desde Firebase...");
+      
+      // Cargar impresoras
+      const impresoras = await window.firebaseObtenerImpresoras();
+      if (impresoras.length > 0) {
+        window.printers = impresoras.map(imp => ({
+          dateReg: imp.fecha_registro,
+          dateInst: imp.fecha_instalacion,
+          serial: imp.numero_serie,
+          mac: imp.mac,
+          model: imp.modelo,
+          city: imp.ciudad,
+          dept: imp.departamento,
+          ip: imp.ip,
+          gateway: imp.gateway,
+          mask: imp.mascara,
+          address: imp.direccion,
+          area: imp.area,
+          contact: imp.contacto,
+          phone: imp.telefono,
+          status: imp.estado,
+          escaner: imp.escaner,
+          slnx: imp.slnx,
+          ndd: imp.ndd,
+          counterInitial: imp.contador_inicial,
+          note: imp.nota
+        }));
+        localStorage.setItem('printers_cache', JSON.stringify(window.printers));
+      }
+
+      // Cargar toners
+      const toners = await window.firebaseObtenerToners();
+      if (toners.length > 0) {
+        window.toners = toners.map(t => ({
+          element: t.elemento,
+          model: t.modelo,
+          printerModel: t.modelo_impresora,
+          color: t.color,
+          location: t.ubicacion,
+          dateReg: t.fecha_registro,
+          status: t.estado,
+          assignedTo: t.asignado_a,
+          assignedDate: t.fecha_asignacion,
+          observation: t.observacion
+        }));
+        localStorage.setItem('toners_cache', JSON.stringify(window.toners));
+      }
+
+      // Cargar retirados
+      const retirados = await window.firebaseObtenerRetirados();
+      if (retirados.length > 0) {
+        window.retired = retirados.map(r => ({
+          serial: r.numero_serie,
+          model: r.modelo,
+          location: r.ubicacion,
+          contact: r.contacto,
+          rma: r.rma,
+          dateRetired: r.fecha_retiro
+        }));
+        localStorage.setItem('retired_cache', JSON.stringify(window.retired));
+      }
+
+      console.log("✅ Datos cargados desde Firebase");
+      
+      // Actualizar las tablas
+      if (typeof renderTable === 'function') renderTable(window.printers);
+      if (typeof renderTonerTable === 'function') renderTonerTable(window.toners);
+      if (typeof renderRetiredTable === 'function') renderRetiredTable(window.retired);
+      
+      showToast("✅ Datos cargados desde Firebase", "success");
+    } catch (error) {
+      console.error("❌ Error al cargar datos desde Firebase:", error);
+      showToast("⚠️ Error al cargar datos. Usando datos locales.", "error");
+    }
+  };
+
+  // Exponer funciones globalmente para debugging
+  window.firebase = {
+    crearImpresora: window.firebaseCrearImpresora,
+    actualizarImpresora: window.firebaseActualizarImpresora,
+    obtenerImpresoras: window.firebaseObtenerImpresoras,
+    agregarContador: window.firebaseAgregarContador,
+    crearToner: window.firebaseCrearToner,
+    obtenerToners: window.firebaseObtenerToners,
+    registrarRetiro: window.firebaseRegistrarRetiro,
+    agregarTarea: window.firebaseAgregarTarea,
+    sincronizarTodo: window.firebaseSincronizarTodo,
+    cargarDatos: window.firebaseCargarDatos,
+    db: db
+  };
+
+  console.log("🔥 Firebase API disponible en window.firebase");
+</script>
 
 </body>
 </html>
