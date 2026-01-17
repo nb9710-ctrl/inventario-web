@@ -1155,7 +1155,9 @@
 </div>
 
 <script>
-    // Sistema de inventario local
+    // Sistema de inventario con Firebase
+    // IMPORTANTE: Los datos se cargan desde Firebase al iniciar sesión
+    // localStorage se usa solo como caché temporal
 
     let printers = JSON.parse(localStorage.getItem('printers_cache')) || [];
     let retired = JSON.parse(localStorage.getItem('retired_cache')) || [];
@@ -3996,6 +3998,17 @@
           const dateInput = document.querySelector('input[name="dateReg"]');
           if (dateInput) dateInput.value = today;
           
+          // Cargar datos desde Firebase automáticamente
+          console.log("🔄 Cargando datos desde Firebase...");
+          try {
+            await window.firebaseCargarDatos();
+            console.log("✅ Datos sincronizados desde Firebase");
+          } catch (error) {
+            console.warn("⚠️ Error al cargar datos desde Firebase:", error);
+            // Si falla, usar los datos del localStorage
+            console.log("📦 Usando datos del caché local");
+          }
+          
           // Marcar como listo y mostrar interfaz completa
           window.authReady = true;
           
@@ -4599,7 +4612,11 @@
   };
 
   window.firebaseObtenerImpresoras = async function() {
-    const snap = await getDocs(collection(db, "impresoras"));
+    const q = query(
+      collection(db, "impresoras"),
+      orderBy("fecha_creacion", "desc")
+    );
+    const snap = await getDocs(q);
     return snap.docs.map(d => ({ id: d.id, ...d.data() }));
   };
 
@@ -4623,6 +4640,35 @@
   window.firebaseObtenerContadores = async function(numero_serie) {
     const snap = await getDocs(collection(db, "impresoras", numero_serie, "contadores"));
     return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  };
+  
+  // Obtener TODOS los contadores de TODAS las impresoras
+  window.firebaseObtenerTodosContadores = async function() {
+    try {
+      const impresoras = await getDocs(collection(db, "impresoras"));
+      const todosContadores = [];
+      
+      for (const impDoc of impresoras.docs) {
+        const contadoresSnap = await getDocs(
+          query(
+            collection(db, "impresoras", impDoc.id, "contadores"),
+            orderBy("fecha_registro", "desc")
+          )
+        );
+        
+        contadoresSnap.docs.forEach(contadorDoc => {
+          todosContadores.push({
+            id: contadorDoc.id,
+            ...contadorDoc.data()
+          });
+        });
+      }
+      
+      return todosContadores;
+    } catch (error) {
+      console.error("Error al obtener todos los contadores:", error);
+      return [];
+    }
   };
 
   // ---------------------------
@@ -4657,7 +4703,11 @@
   };
 
   window.firebaseObtenerToners = async function() {
-    const snap = await getDocs(collection(db, "toners"));
+    const q = query(
+      collection(db, "toners"),
+      orderBy("fecha_creacion", "desc")
+    );
+    const snap = await getDocs(q);
     return snap.docs.map(d => ({ id: d.id, ...d.data() }));
   };
 
@@ -4679,7 +4729,11 @@
   };
 
   window.firebaseObtenerRetirados = async function() {
-    const snap = await getDocs(collection(db, "retirados"));
+    const q = query(
+      collection(db, "retirados"),
+      orderBy("fecha_creacion", "desc")
+    );
+    const snap = await getDocs(q);
     return snap.docs.map(d => ({ id: d.id, ...d.data() }));
   };
 
@@ -4789,9 +4843,15 @@
     try {
       console.log("📥 Cargando datos desde Firebase...");
       
+      // Inicializar arrays vacíos por si no hay datos
+      window.printers = window.printers || [];
+      window.toners = window.toners || [];
+      window.retired = window.retired || [];
+      window.counters = window.counters || [];
+      
       // Cargar impresoras
       const impresoras = await window.firebaseObtenerImpresoras();
-      if (impresoras.length > 0) {
+      if (impresoras && impresoras.length > 0) {
         window.printers = impresoras.map(imp => ({
           dateReg: imp.fecha_registro,
           dateInst: imp.fecha_instalacion,
@@ -4819,7 +4879,7 @@
 
       // Cargar toners
       const toners = await window.firebaseObtenerToners();
-      if (toners.length > 0) {
+      if (toners && toners.length > 0) {
         window.toners = toners.map(t => ({
           element: t.elemento,
           model: t.modelo,
@@ -4837,7 +4897,7 @@
 
       // Cargar retirados
       const retirados = await window.firebaseObtenerRetirados();
-      if (retirados.length > 0) {
+      if (retirados && retirados.length > 0) {
         window.retired = retirados.map(r => ({
           serial: r.numero_serie,
           model: r.modelo,
@@ -4848,15 +4908,40 @@
         }));
         localStorage.setItem('retired_cache', JSON.stringify(window.retired));
       }
-
+      
+      // Cargar contadores desde Firebase
+      console.log("📊 Cargando contadores desde Firebase...");
+      const todosContadores = await window.firebaseObtenerTodosContadores();
+      if (todosContadores && todosContadores.length > 0) {
+        window.counters = todosContadores.map(c => ({
+          serial: c.numero_serie,
+          model: c.modelo,
+          bn: c.contador_bn,
+          color: c.contador_color,
+          location: c.ubicacion,
+          dateReg: c.fecha_registro?.toDate?.() ? c.fecha_registro.toDate().toISOString().split('T')[0] : c.fecha_registro
+        }));
+        localStorage.setItem('counters_cache', JSON.stringify(window.counters));
+        console.log(`✅ ${window.counters.length} contadores cargados`);
+      } else {
+        console.log("ℹ️ No hay contadores en Firebase");
+      }
+      
       console.log("✅ Datos cargados desde Firebase");
       
-      // Actualizar las tablas
-      if (typeof renderTable === 'function') renderTable(window.printers);
-      if (typeof renderTonerTable === 'function') renderTonerTable(window.toners);
-      if (typeof renderRetiredTable === 'function') renderRetiredTable(window.retired);
+      // Asegurar que las variables existan antes de mostrar el resumen
+      const printersCount = window.printers ? window.printers.length : 0;
+      const tonersCount = window.toners ? window.toners.length : 0;
+      const retiredCount = window.retired ? window.retired.length : 0;
+      console.log(`📊 Resumen: ${printersCount} impresoras, ${tonersCount} tóners, ${retiredCount} retirados`);
       
-      showToast("✅ Datos cargados desde Firebase", "success");
+      // Actualizar las tablas solo si existen datos
+      if (window.printers && typeof renderTable === 'function') renderTable(window.printers);
+      if (window.toners && typeof renderTonerTable === 'function') renderTonerTable(window.toners);
+      if (window.retired && typeof renderRetiredTable === 'function') renderRetiredTable(window.retired);
+      if (window.counters && typeof renderCountersTable === 'function') renderCountersTable(window.counters);
+      
+      // No mostrar toast aquí, ya se muestra en el proceso de autenticación
     } catch (error) {
       console.error("❌ Error al cargar datos desde Firebase:", error);
       showToast("⚠️ Error al cargar datos. Usando datos locales.", "error");
